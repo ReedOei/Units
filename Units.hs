@@ -95,6 +95,15 @@ module Data.Units where
               aDivFinal = case filter (/= noUnit) d of
                             [] -> noUnit
                             xs -> foldl1 Mult xs
+                            
+    ampere = addSIPrefixes $ Base "current" "ampere" "A" aConversions
+        where aConversions = Map.fromList []
+        
+    kelvin = addSIPrefixes $ Base "temperature" "kelvin" "K" kConversions
+        where kConversions = Map.fromList []
+        
+    candela = addSIPrefixes $ Base "luminosity" "candela" "cd" cdConversions
+        where cdConversions = Map.fromList []
 
     second = addSIPrefixes $ Base "time" "second" "s" sConversions
         where sConversions = Map.fromList [("minute", 1 / 60)]
@@ -103,7 +112,16 @@ module Data.Units where
         where minConversions = Map.fromList [("second", 60), ("hour", 1/60)]
 
     hour = addSIPrefixes $ Base "time" "hour" "hr" hrConversions
-        where hrConversions = Map.fromList [("minute", 60)]
+        where hrConversions = Map.fromList [("minute", 60), ("day", 1/24)]
+        
+    day = Base "time" "day" "day" dayConversions
+        where dayConversions = Map.fromList [("hour", 24), ("week", 1/7), ("year", 1/365)]
+        
+    week = Base "time" "week" "wk" wkConversions
+        where wkConversions = Map.fromList [("day", 7)]
+        
+    year = Base "time" "year" "yr" yrConversions
+        where yrConversions = Map.fromList [("day", 365)]
 
     gram = addSIPrefixes $ Base "mass" "gram" "g" gConversions
         where gConversions = Map.fromList [("pound", 0.0022046226)]
@@ -120,7 +138,7 @@ module Data.Units where
     inch = Base "length" "inch" "in" inConversions
         where inConversions = Map.fromList [("foot", 1/12)]
     foot = Base "length" "foot" "ft" ftConversions
-        where ftConversions = Map.fromList [("meter", 0.3048), ("yard", 3), ("inch", 12), ("chain", 1/66), ("link", 50/33)]
+        where ftConversions = Map.fromList [("meter", 0.3048), ("yard", 1 / 3), ("inch", 12), ("chain", 1/66), ("link", 50/33)]
     yard = Base "length" "yard" "yd" ydConversions
         where ydConversions = Map.fromList [("foot", 3), ("fathom", 1/2), ("mile", 1 / 1760)]
     fathom = Base "length" "fathom" "ftm" ftmConversions
@@ -141,12 +159,21 @@ module Data.Units where
         where miConversions = Map.fromList [("nauticalMile", 1 / 1.151), ("league", 1 / 3), ("yard", 1760)]
 
     newton = addSIPrefixes $ Derived "force" "Newton" "N" 1 (Mult (Mult (kilo gram) meter) (Inv (Mult second second)))
-
+    coulomb = addSIPrefixes $ Derived "charge" "coulomb" "C" 1 (Mult second ampere)
+    joule = addSIPrefixes $ Derived "energy" "joule" "K" 1 (Mult newton meter)
+    watt = addSIPrefixes $ Derived "power" "watt" "W" 1 (Mult joule (Inv second))
+    hertz = addSIPrefixes $ Derived "frequency" "hertz" "Hz" 1 (Mult noUnit (Inv second))
+    volt = addSIPrefixes $ Derived "potential" "volt" "V" 1 (Mult joule (Inv coulomb))
+    farad = addSIPrefixes $ Derived "capacitance" "farad" "F" 1 (Mult coulomb (Inv volt))
+    ohm = addSIPrefixes $ Derived "resistance" "ohm" "Ω" 1 (Mult volt (Inv ampere))
+    tesla = addSIPrefixes $ Derived "magnetic field" "tesla" "T" 1 (Mult newton (Inv (Mult ampere meter)))
+    
     acre = Derived "area" "acre" "ac" 1 (Mult chain furlong)
 
-    baseUnits = [second, minute, hour, gram, pound, au, meter, inch, foot, yard, fathom,
-                 chain, link, rod, league, nauticalMile, mile]
-    derivedUnits = [newton, acre]
+    baseUnits = [second, minute, hour, day, week, year, gram, pound, au, meter, inch, foot, 
+                 yard, fathom, chain, link, rod, league, nauticalMile, mile, ampere,
+                 kelvin, candela]
+    derivedUnits = [newton, acre, coulomb, joule, watt, hertz, volt, farad, ohm, tesla]
     allUnits = baseUnits ++ derivedUnits ++ [u | base <- baseUnits ++ derivedUnits, pref <- siPrefFunc, let u = pref base]
         
     siPrefFunc :: [Unit -> Unit]
