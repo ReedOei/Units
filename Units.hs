@@ -4,10 +4,10 @@
 module Data.Units where
     import Control.Monad
 
-    import Data.List (intercalate, sort, sortBy, find, findIndex)
+    import Data.List (intercalate, sort, sortBy, find, findIndex, minimumBy)
     import Data.List.Utils (replace, split)
     import qualified Data.Map as Map
-    import Data.Maybe (isJust)
+    import Data.Maybe (isJust, fromJust, mapMaybe)
     import Data.Ord (comparing)
 
     import System.IO.Unsafe
@@ -34,23 +34,26 @@ module Data.Units where
 
     isAlpha :: Char -> Bool
     isAlpha c = c `elem` (['a'..'z'] ++ ['A'..'Z'])
-    
+
     -- Removes \n, \t, \r, and ' ' from the left side (the beginning) of a string
     lTrim :: String -> String
     lTrim = dropWhile (`elem` " \n\r\t")
-    
+
     -- Removes \n, \t, \r, and ' ' from the right side (the end) of a string
     rTrim :: String -> String
     rTrim = reverse . lTrim . reverse
-    
+
     -- Removes \n, \t, \r, and ' ' from the left and right sides of a string
     trim :: String -> String
     trim = rTrim . lTrim
 
+    groupBy :: Ord b => (a -> b) -> [a] -> [[a]]
+    groupBy f xs = map snd $ Map.toList $ foldl (\cur v -> Map.insertWith (++) (f v) [v] cur) Map.empty xs
+
     -----------------------------------------------------------------------------
     -------------------------- DATA TYPE DEFINITIONS
     -----------------------------------------------------------------------------
-    data Unit = Base String String String (Map.Map String Double) |
+    data Unit = Base String String String (Map.Map String (Double -> Double)) |
                 Inv Unit |
                 Mult Unit Unit | -- Could be N m (energy) or ms**-1 (velocity)
                 -- Newtons and such, for example. The double is how many there are in that unit.s
@@ -85,7 +88,7 @@ module Data.Units where
 
     addSIPrefixes :: Unit -> Unit
     addSIPrefixes (Base uType name abb conv) = Base uType name abb newConv
-        where newConv = foldl (\cur (pref, mult) -> Map.insert (pref ++ name) (1 / mult) cur) conv siPrefixes
+        where newConv = foldl (\cur (pref, mult) -> Map.insert (pref ++ name) (\v -> 1 / mult) cur) conv siPrefixes
     addSIPrefixes a@(Derived uType name abb val base) = Derived uType name abb val (Mult aMultFinal (Inv aDivFinal))
         where (m:ms, d) = getBaseUnitTuple a
               newM = addSIPrefixes m
@@ -95,68 +98,68 @@ module Data.Units where
               aDivFinal = case filter (/= noUnit) d of
                             [] -> noUnit
                             xs -> foldl1 Mult xs
-                            
+
     ampere = addSIPrefixes $ Base "current" "ampere" "A" aConversions
         where aConversions = Map.fromList []
-        
+
     kelvin = addSIPrefixes $ Base "temperature" "kelvin" "K" kConversions
         where kConversions = Map.fromList []
-        
+
     candela = addSIPrefixes $ Base "luminosity" "candela" "cd" cdConversions
         where cdConversions = Map.fromList []
 
     second = addSIPrefixes $ Base "time" "second" "s" sConversions
-        where sConversions = Map.fromList [("minute", 1 / 60)]
+        where sConversions = Map.fromList [("minute", \v -> v * 1 / 60)]
 
     minute = addSIPrefixes $ Base "time" "minute" "min" minConversions
-        where minConversions = Map.fromList [("second", 60), ("hour", 1/60)]
+        where minConversions = Map.fromList [("second", \v -> v * 60), ("hour", \v -> v * 1/60)]
 
     hour = addSIPrefixes $ Base "time" "hour" "hr" hrConversions
-        where hrConversions = Map.fromList [("minute", 60), ("day", 1/24)]
-        
+        where hrConversions = Map.fromList [("minute", \v -> v * 60), ("day", \v -> v * 1/24)]
+
     day = Base "time" "day" "day" dayConversions
-        where dayConversions = Map.fromList [("hour", 24), ("week", 1/7), ("year", 1/365)]
-        
+        where dayConversions = Map.fromList [("hour", \v -> v * 24), ("week", \v -> v * 1/7), ("year", \v -> v * 1/365)]
+
     week = Base "time" "week" "wk" wkConversions
-        where wkConversions = Map.fromList [("day", 7)]
-        
+        where wkConversions = Map.fromList [("day", \v -> v * 7)]
+
     year = Base "time" "year" "yr" yrConversions
-        where yrConversions = Map.fromList [("day", 365)]
+        where yrConversions = Map.fromList [("day", \v -> v * 365)]
 
     gram = addSIPrefixes $ Base "mass" "gram" "g" gConversions
-        where gConversions = Map.fromList [("pound", 0.0022046226)]
+        where gConversions = Map.fromList [("pound", \v -> v * 0.0022046226)]
 
     pound = addSIPrefixes $ Base "mass" "pound" "lbs" lbsConversions
-        where lbsConversions = Map.fromList [("gram", 453.59237)]
+        where lbsConversions = Map.fromList [("gram", \v -> v * 453.59237)]
 
     au = addSIPrefixes $ Base "length" "au" "AU" auConversions
-        where auConversions = Map.fromList [("meter", 149597870700)]
+        where auConversions = Map.fromList [("meter", \v -> v * 149597870700)]
 
     meter = addSIPrefixes $ Base "length" "meter" "m" mConversions
-        where mConversions = Map.fromList [("foot", 3.28084), ("au", 6.68459*10**(-12))]
+        where mConversions = Map.fromList [("foot", \v -> v * 3.28084), ("au", \v -> v * 6.68459*10**(-12))]
 
     inch = Base "length" "inch" "in" inConversions
-        where inConversions = Map.fromList [("foot", 1/12)]
+        where inConversions = Map.fromList [("foot", \v -> v * 1/12)]
     foot = Base "length" "foot" "ft" ftConversions
-        where ftConversions = Map.fromList [("meter", 0.3048), ("yard", 1 / 3), ("inch", 12), ("chain", 1/66), ("link", 50/33)]
+        where ftConversions = Map.fromList [("meter", \v -> v * 0.3048), ("yard", \v -> v * 1 / 3), ("inch", \v -> v * 12), ("chain", \v -> v * 1/66), ("link", \v -> v * 50/33)]
     yard = Base "length" "yard" "yd" ydConversions
-        where ydConversions = Map.fromList [("foot", 3), ("fathom", 1/2), ("mile", 1 / 1760)]
+        where ydConversions = Map.fromList [("foot", \v -> v * 3), ("fathom", \v -> v * 1/2), ("mile", \v -> v * 1 / 1760)]
     fathom = Base "length" "fathom" "ftm" ftmConversions
-        where ftmConversions = Map.fromList [("yard", 2)]
+        where ftmConversions = Map.fromList [("yard", \v -> v * 2)]
     furlong = Base "length" "furlong" "fur" furConversions
-        where furConversions = Map.fromList [("chain", 10)]
+        where furConversions = Map.fromList [("chain", \v -> v * 10)]
     chain = Base "length" "chain" "ch" chConversions
-        where chConversions = Map.fromList [("foot", 66)]
+        where chConversions = Map.fromList [("foot", \v -> v * 66)]
     link = Base "length" "link" "li" liConversions
-        where liConversions = Map.fromList [("foot", 33/50), ("rod", 1/25)]
+        where liConversions = Map.fromList [("foot", \v -> v * 33/50), ("rod", \v -> v * 1/25)]
     rod = Base "length" "rod" "rd" rdConversions
-        where rdConversions = Map.fromList [("link", 25)]
+        where rdConversions = Map.fromList [("link", \v -> v * 25)]
     league = Base "length" "league" "lea" leaConversions
-        where leaConversions = Map.fromList [("mile", 3)]
+        where leaConversions = Map.fromList [("mile", \v -> v * 3)]
     nauticalMile = Base "length" "nautical mile" "NM" nmConversions
-        where nmConversions = Map.fromList [("mile", 1.151)]
+        where nmConversions = Map.fromList [("mile", \v -> v * 1.151)]
     mile = Base "length" "mile" "mi" miConversions
-        where miConversions = Map.fromList [("nauticalMile", 1 / 1.151), ("league", 1 / 3), ("yard", 1760)]
+        where miConversions = Map.fromList [("nauticalMile", \v -> v * 1 / 1.151), ("league", \v -> v * 1 / 3), ("yard", \v -> v * 1760)]
 
     newton = addSIPrefixes $ Derived "force" "Newton" "N" 1 (Mult (Mult (kilo gram) meter) (Inv (Mult second second)))
     coulomb = addSIPrefixes $ Derived "charge" "coulomb" "C" 1 (Mult second ampere)
@@ -167,106 +170,49 @@ module Data.Units where
     farad = addSIPrefixes $ Derived "capacitance" "farad" "F" 1 (Mult coulomb (Inv volt))
     ohm = addSIPrefixes $ Derived "resistance" "ohm" "Ω" 1 (Mult volt (Inv ampere))
     tesla = addSIPrefixes $ Derived "magnetic field" "tesla" "T" 1 (Mult newton (Inv (Mult ampere meter)))
-    
+
     acre = Derived "area" "acre" "ac" 1 (Mult chain furlong)
 
-    baseUnits = [second, minute, hour, day, week, year, gram, pound, au, meter, inch, foot, 
+    baseUnits = [second, minute, hour, day, week, year, gram, pound, au, meter, inch, foot,
                  yard, fathom, chain, link, rod, league, nauticalMile, mile, ampere,
                  kelvin, candela]
     derivedUnits = [newton, acre, coulomb, joule, watt, hertz, volt, farad, ohm, tesla]
-    allUnits = baseUnits ++ derivedUnits ++ [u | base <- baseUnits ++ derivedUnits, pref <- siPrefFunc, let u = pref base]
-        
+    allUnits = baseUnits ++ derivedUnits ++ [u | base <- baseUnits ++ derivedUnits, pref <- siPrefFunc, let u = pref base] ++ [noUnit]
+
     siPrefFunc :: [Unit -> Unit]
     siPrefFunc = [exa, peta, tera, giga, mega, kilo, hecto, deca, deci, centi, milli, micro, nano, pico, femto, atto]
 
     -- SI Prefixes are functions that convert a normal unit to its prefixed version (generates a new base unit)
     -- Also generates a conversion to the original unit
-    exa :: Unit -> Unit
-    exa (Base uType name abb conv) = Base uType ("exa" ++ name) ("E" ++ abb) exaConversions
-        where exaConversions = Map.insert name (10**18) $ Map.map (* (10**18)) conv
-    exa (Derived uType name abb val base) = Derived uType ("exa" ++ name) ("E" ++ abb) (10**18 * val) base
+    exa = makePrefix "exa" "E" (10**18)
+    peta = makePrefix "peta" "P" (10**15)
+    tera = makePrefix "tera" "T" (10**12)
+    giga = makePrefix "giga" "G" (10**9)
+    mega = makePrefix "mega" "M" (10**6)
+    kilo = makePrefix "kilo" "k" (10**3)
+    hecto = makePrefix "hecto" "h" (10**2)
+    deca = makePrefix "deca" "da" (10**1)
+    deci = makePrefix "deci" "d" (10**(-1))
+    centi = makePrefix "centi" "c" (10**(-2))
+    milli = makePrefix "milli" "m" (10**(-3))
+    micro = makePrefix "micro" "μ" (10**(-6))
+    nano = makePrefix "nano" "n" (10**(-9))
+    pico = makePrefix "pico" "p" (10**(-12))
+    femto = makePrefix "femto" "f" (10**(-15))
+    atto = makePrefix "atto" "a" (10**(-18))
 
-    peta :: Unit -> Unit
-    peta (Base uType name abb conv) = Base uType ("peta" ++ name) ("P" ++ abb) petaConversions
-        where petaConversions = Map.insert name (10**15) $ Map.map (* (10**15)) conv
-    peta (Derived uType name abb val base) = Derived uType ("peta" ++ name) ("P" ++ abb) (10**15 * val) base
-
-    tera :: Unit -> Unit
-    tera (Base uType name abb conv) = Base uType ("tera" ++ name) ("T" ++ abb) teraConversions
-        where teraConversions = Map.insert name (10**12) $ Map.map (* (10**12)) conv
-    tera (Derived uType name abb val base) = Derived uType ("tera" ++ name) ("T" ++ abb) (10**12 * val) base
-
-    giga :: Unit -> Unit
-    giga (Base uType name abb conv) = Base uType ("giga" ++ name) ("G" ++ abb) gigaConversions
-        where gigaConversions = Map.insert name (10**9) $ Map.map (* (10**9)) conv
-    giga (Derived uType name abb val base) = Derived uType ("giga" ++ name) ("G" ++ abb) (10**9 * val) base
-
-    mega :: Unit -> Unit
-    mega (Base uType name abb conv) = Base uType ("mega" ++ name) ("M" ++ abb) megaConversions
-        where megaConversions = Map.insert name (10**6) $ Map.map (* (10**6)) conv
-    mega (Derived uType name abb val base) = Derived uType ("mega" ++ name) ("M" ++ abb) (10**6 * val) base
-
-    kilo :: Unit -> Unit
-    kilo (Base uType name abb conv) = Base uType ("kilo" ++ name) ("k" ++ abb) kiloConversions
-        where kiloConversions = Map.insert name (10**3) $ Map.map (* (10**3)) conv
-    kilo (Derived uType name abb val base) = Derived uType ("kilo" ++ name) ("k" ++ abb) (10**3 * val) base
-
-    hecto :: Unit -> Unit
-    hecto (Base uType name abb conv) = Base uType ("hecto" ++ name) ("h" ++ abb) hectoConversions
-        where hectoConversions = Map.insert name (10**2) $ Map.map (* (10**2)) conv
-    hecto (Derived uType name abb val base) = Derived uType ("hecto" ++ name) ("h" ++ abb) (10**2 * val) base
-
-    deca :: Unit -> Unit
-    deca (Base uType name abb conv) = Base uType ("deca" ++ name) ("da" ++ abb) decaConversions
-        where decaConversions = Map.insert name (10**1) $ Map.map (* (10**1)) conv
-    deca (Derived uType name abb val base) = Derived uType ("deca" ++ name) ("da" ++ abb) (10**1 * val) base
-
-    deci :: Unit -> Unit
-    deci (Base uType name abb conv) = Base uType ("deci" ++ name) ("d" ++ abb) conversions
-        where conversions = Map.insert name (10**(-1)) $ Map.map (* (10**(-1))) conv
-    deci (Derived uType name abb val base) = Derived uType ("deci" ++ name) ("d" ++ abb) (10**(-1) * val) base
-
-    centi :: Unit -> Unit
-    centi (Base uType name abb conv) = Base uType ("centi" ++ name) ("c" ++ abb) conversions
-        where conversions = Map.insert name (10**(-2)) $ Map.map (* (10**(-2))) conv
-    centi (Derived uType name abb val base) = Derived uType ("centi" ++ name) ("c" ++ abb) (10**(-2) * val) base
-
-    milli :: Unit -> Unit
-    milli (Base uType name abb conv) = Base uType ("milli" ++ name) ("m" ++ abb) conversions
-        where conversions = Map.insert name (10**(-3)) $ Map.map (* (10**(-3))) conv
-    milli (Derived uType name abb val base) = Derived uType ("milli" ++ name) ("m" ++ abb) (10**(-3) * val) base
-
-    micro :: Unit -> Unit
-    micro (Base uType name abb conv) = Base uType ("micro" ++ name) ("μ" ++ abb) conversions
-        where conversions = Map.insert name (10**(-6)) $ Map.map (* (10**(-6))) conv
-    micro (Derived uType name abb val base) = Derived uType ("micro" ++ name) ("μ" ++ abb) (10**(-6) * val) base
-
-    nano :: Unit -> Unit
-    nano (Base uType name abb conv) = Base uType ("nano" ++ name) ("n" ++ abb) conversions
-        where conversions = Map.insert name (10**(-9)) $ Map.map (* (10**(-9))) conv
-    nano (Derived uType name abb val base) = Derived uType ("nano" ++ name) ("n" ++ abb) (10**(-9) * val) base
-
-    pico :: Unit -> Unit
-    pico (Base uType name abb conv) = Base uType ("pico" ++ name) ("p" ++ abb) conversions
-        where conversions = Map.insert name (10**(-12)) $ Map.map (* (10**(-12))) conv
-    pico (Derived uType name abb val base) = Derived uType ("pico" ++ name) ("p" ++ abb) (10**(-12) * val) base
-
-    femto :: Unit -> Unit
-    femto (Base uType name abb conv) = Base uType ("femto" ++ name) ("f" ++ abb) conversions
-        where conversions = Map.insert name (10**(-15)) $ Map.map (* (10**(-15))) conv
-    femto (Derived uType name abb val base) = Derived uType ("femto" ++ name) ("f" ++ abb) (10**(-15) * val) base
-
-    atto :: Unit -> Unit
-    atto (Base uType name abb conv) = Base uType ("atto" ++ name) ("a" ++ abb) conversions
-        where conversions = Map.insert name (10**(-18)) $ Map.map (* (10**(-18))) conv
-    atto (Derived uType name abb val base) = Derived uType ("atto" ++ name) ("a" ++ abb) (10**(-18) * val) base
+    makePrefix :: String -> String -> Double -> Unit -> Unit
+    makePrefix prefixName prefixAbb val = f
+        where f (Base uType name abb conv) = Base uType (prefixName ++ name) (prefixAbb ++ abb) conversions
+                where conversions = Map.insert name (\v -> v * val) $ Map.map (\f -> \v -> f v * val) conv
+              f (Derived uType name abb val base) = Derived uType (prefixName ++ name) (prefixAbb ++ abb) val base
 
     -----------------------------------------------------------------------------
     -------------------------- UTILITY FUNCTIONS
     -----------------------------------------------------------------------------
     collectMultUnits :: Unit -> [Unit]
     collectMultUnits a@(Base _ _ _ _) = [a]
-    collectMultUnits (Inv _) = []
+    collectMultUnits (Inv a) = collectDivUnits a
     collectMultUnits (Mult a b) = collectMultUnits a ++ collectMultUnits b
     collectMultUnits (Derived _ _ _ _ base) = collectMultUnits base
 
@@ -308,20 +254,49 @@ module Data.Units where
                             Just dUnit -> dUnit
         where aBase = getBaseUnitTuple a
 
+    -- getConversion :: Unit -> [String] -> Unit -> Maybe Double
+    -- Convert units of the same type to the same unit (for example, cm*m/(s*hr) will become m^2/s^2)
+    simplifyMult :: [Unit] -> (Double, [Unit])
+    simplifyMult units = (product multipliers, foldl1 (++) finalUnits)
+        where unitGroups = groupBy getUnitType units
+              (multipliers, finalUnits) = unzip $ map getMultiplier unitGroups
+              -- Get all of the conversions and multiply them together.
+              -- Afterwards, all units are the preferred unit, so just replicate that.
+              getMultiplier group@(x:_) = case (mapM (\unit -> getConversion preferredUnit [] unit) group) >>= (return . product) of
+                                            Nothing -> (1, replicate (length group) preferredUnit)
+                                            Just v -> (v, replicate (length group) preferredUnit)
+                where -- Find the unit in the group that comes first in the list of units, that's the preferred unit.
+                      -- This will cause base units to be favored over units with prefixes, for example, but also meters over feet.
+                      preferredUnit = fst $ minimumBy (comparing (fromJust . snd)) $ filter (isJust . snd) $ map (\v -> (v, findIndex (== v) allUnits)) group
+
+    simplifyUnitMult :: Unit -> Unit -> (Double, Unit)
+    simplifyUnitMult unitA unitB = (mMult / dMult, builtUnitFromBase mUnits dUnits)
+        where units = unitA * unitB
+              (multUnits, divUnits) = getBaseUnitTuple units
+              (mMult, mUnits) = simplifyMult multUnits
+              (dMult, dUnits) = simplifyMult divUnits
+
+    simplifyUnitDiv :: Unit -> Unit -> (Double, Unit)
+    simplifyUnitDiv unitA unitB = (1 / multiplier, units)
+        where (multiplier, units) = simplifyUnitMult unitA unitB
+
+    -- Multiplies together all the units in the first list and divides them by the units in the second
+    builtUnitFromBase :: [Unit] -> [Unit] -> Unit
+    builtUnitFromBase mUnits dUnits = Mult aMultFinal (Inv aDivFinal)
+        where aMultFinal = case filter (/= noUnit) mUnits of
+                                [] -> noUnit
+                                xs -> foldl1 Mult xs
+              aDivFinal = case filter (/= noUnit) dUnits of
+                                [] -> noUnit
+                                xs -> foldl1 Mult xs
+
     simplifyUnits :: Unit -> Unit
     simplifyUnits a@(Base _ _ _ _) = a
     simplifyUnits a@(Inv b) = getDerivedUnit $ Inv $ simplifyUnits b
     simplifyUnits a@(Derived _ _ _ _ _) = a
-    simplifyUnits a = getDerivedUnit m
-        where m = Mult aMultFinal (Inv aDivFinal)
-              (aMult, aDiv) = getBaseUnitTuple a
+    simplifyUnits a = getDerivedUnit $ builtUnitFromBase aMultRes aDivRes
+        where (aMult, aDiv) = getBaseUnitTuple a
               (aMultRes, aDivRes) = cancel aMult aDiv
-              aMultFinal = case filter (/= noUnit) $ aMultRes of
-                            [] -> noUnit
-                            xs -> foldl1 Mult xs
-              aDivFinal = case filter (/= noUnit) $ aDivRes of
-                            [] -> noUnit
-                            xs -> foldl1 Mult xs
 
     getVal :: Quantity -> Double
     getVal (Quantity _ val) = val
@@ -355,15 +330,9 @@ module Data.Units where
         (Derived type1 name1 abb1 val1 base1) == (Derived type2 name2 abb2 val2 base2) = (type1 == type2) && (name1 == name2) && (abb1 == abb2) && (val1 == val2) && (base1 == base2)
         (Derived _ _ _ _ base) == b = base == b
         a == (Derived _ _ _ _ base) = a == base
-        (Mult a1 a2) == (Mult b1 b2) = (sort aMult == sort bMult) && (sort aDiv == sort bDiv)
-            where aMult = collectMultUnits a1 ++ collectMultUnits a2
-                  aDiv = collectDivUnits a1 ++ collectDivUnits a2
-                  bMult = collectMultUnits b1 ++ collectMultUnits b2
-                  bDiv = collectDivUnits b1 ++ collectDivUnits b2
-        a == b = unsafePerformIO $ do
-                    print a
-                    print b
-                    return True
+        a == b = (aMult == bMult) && (aDiv == bDiv)
+            where (aMult, aDiv) = getBaseUnitTuple a
+                  (bMult, bDiv) = getBaseUnitTuple b
 
     instance Num Unit where
         a + b
@@ -402,10 +371,11 @@ module Data.Units where
                                 Nothing -> error ("Cannot convert! " ++ errMsg)
                                 Just converted -> Quantity unitB (getVal converted - valB)
             where errMsg = "Value " ++ show valA ++ " has units of " ++ show unitA ++ " and value " ++ show valB ++ " has units of " ++ show unitB ++ "."
-        
+
         (Quantity (Derived _ _ _ conv unitA) valA) * b = (Quantity unitA (conv * valA)) * b
         a * (Quantity (Derived _ _ _ conv unitB) valB) = a * (Quantity unitB (valB / conv))
-        (Quantity unitA valA) * (Quantity unitB valB) = Quantity (unitA * unitB) (valA * valB)
+        (Quantity unitA valA) * (Quantity unitB valB) = Quantity units (multiplier * valA * valB)
+            where (multiplier, units) = simplifyUnitMult unitA unitB
 
         abs (Quantity unitA valA) = Quantity unitA (abs valA)
         signum (Quantity unitA valA) = Quantity unitA (signum valA)
@@ -414,22 +384,23 @@ module Data.Units where
     instance Fractional Quantity where
         (Quantity (Derived _ _ _ conv unitA) valA) / b = (Quantity unitA (conv * valA)) / b
         a / (Quantity (Derived _ _ _ conv unitB) valB) = a / (Quantity unitB (valB / conv))
-        (Quantity unitA valA) / (Quantity unitB valB) = Quantity (unitA / unitB) (valA / valB)
+        (Quantity unitA valA) / (Quantity unitB valB) = Quantity units (multiplier * valA / valB)
+            where (multiplier, units) = simplifyUnitDiv unitA unitB
 
         fromRational v = Quantity noUnit (fromRational v)
 
     instance Show Quantity where
         show (Quantity unit val) = show val ++ " " ++ show unit
-        
+
     instance Num a => Num (Maybe a) where
         (+) = liftM2 (+)
         (-) = liftM2 (-)
         (*) = liftM2 (*)
-        
+
         abs = liftM abs
         signum = liftM signum
         fromInteger = Just . fromInteger
-        
+
     instance Fractional a => Fractional (Maybe a) where
         (/) = liftM2 (/)
         fromRational = Just . fromRational
@@ -451,7 +422,7 @@ module Data.Units where
     -- Otherwise returns Nothing
     -- Converts from a to b (arguments are in the other order for convenience in recursion)
     -- The second argument is the list of the names of the units that have been tried already, so it doesn't get into a loop
-    getConversion :: Unit -> [String] -> Unit -> Maybe Double
+    getConversion :: Unit -> [String] -> Unit -> Maybe (Double -> Double)
     getConversion b@(Derived _ _ _ valB baseB) history a = case baseConv of
                                                         Nothing -> Nothing
                                                         Just conv -> Just $ conv / valB
@@ -465,17 +436,13 @@ module Data.Units where
                                             Nothing -> case find isJust $ map getNextConv $ filter (not . (`elem` history) . fst) $ Map.toList conv of
                                                         Nothing -> Nothing
                                                         Just v -> v
-                                            Just v -> Just v -- We found it
+                                            Just v -> Just $ v 1 -- We found it
         where getNextConv (name, conv) = case (getUnitByName name) >>= (getConversion b (name : history)) of
                                             Nothing -> Nothing
-                                            Just v -> Just $ conv * v
-    getConversion b history a = unsafePerformIO $ do
-                                    print b
-                                    print history
-                                    print a
-                                    return $ case convert (Quantity a 1) b of
-                                                Nothing -> Nothing
-                                                Just (Quantity _ v) -> Just v
+                                            Just v -> Just $ conv v
+    getConversion b history a = case convert (Quantity a 1) b of
+                                    Nothing -> Nothing
+                                    Just (Quantity _ v) -> Just v
 
     -- Converts a quantity in one unit to another if possible, otherwise returns Nothing
     convert :: Quantity -> Unit -> Maybe Quantity
@@ -512,7 +479,7 @@ module Data.Units where
                                         case parseUnit base of
                                             Nothing -> Nothing
                                             Just v -> Just $ v^(read $ tail exp)
-    
+
     -- Takes a string and returns full units associated with that abbreviation (if possible)
     -- Opposite of "show" for Units
     parseUnits :: String -> Maybe Unit
@@ -529,18 +496,18 @@ module Data.Units where
                                 Nothing -> (xs, "")
                                 Just i -> splitAt i xs
               multUnits = mapM parseUnit $ split "*" $ replace ")" "" $ replace "(" "" mult
-              divUnits = case div of 
+              divUnits = case div of
                             [] -> Nothing
                             (_:ds) -> mapM parseUnit $ split "*" $ replace "(" ""  $ replace ")" "" ds
-                                
+
     -- Takes a string and returns a quantity representing that string (if possible)
     parseQuantity :: String -> Maybe Quantity
     parseQuantity inXs = case findIndex (not . isNumeric) xs of
                                 Nothing -> Nothing
-                                Just i -> let (val, units) = splitAt i xs in 
+                                Just i -> let (val, units) = splitAt i xs in
                                             case parseUnits units of
                                                 Nothing -> Nothing
                                                 Just u -> Just $ Quantity u $ read val
         where xs = trim inXs
-    
+
     q = parseQuantity
